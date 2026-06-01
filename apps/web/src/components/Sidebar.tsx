@@ -900,6 +900,8 @@ interface SidebarProjectItemProps {
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
+  markVisited: ReturnType<typeof useThreadActions>["markVisited"];
+  markUnread: ReturnType<typeof useThreadActions>["markUnread"];
   threadJumpLabelByKey: ReadonlyMap<string, string>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
   expandThreadListForProject: (projectKey: string) => void;
@@ -920,6 +922,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     handleNewThread,
     archiveThread,
     deleteThread,
+    markVisited,
+    markUnread,
     threadJumpLabelByKey,
     attachThreadListAutoAnimateRef,
     expandThreadListForProject,
@@ -1582,10 +1586,21 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(threadRef),
       });
+      // Cross-surface read-state sync: tell the projection we've
+      // visited the thread so Mac notch + Android tray grey the dot in
+      // ~250 ms. Server rejects threads with no completed turn, so we
+      // pre-check the `latestTurn?.completedAt`; markVisited itself is
+      // also defensive against the missing-turn case. Fire-and-forget;
+      // a missing dispatch leaves the existing UI behaviour intact.
+      const thread = sidebarThreadByKeyRef.current.get(threadKey);
+      if (thread?.latestTurn?.completedAt) {
+        void markVisited(threadRef, thread.latestTurn.completedAt);
+      }
     },
     [
       clearSelection,
       isMobile,
+      markVisited,
       rangeSelectTo,
       router,
       setOpenMobile,
@@ -1613,7 +1628,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       if (clicked === "mark-unread") {
         for (const threadKey of threadKeys) {
           const thread = sidebarThreadByKeyRef.current.get(threadKey);
+          // Local-first for instant UI feedback, then server dispatch
+          // so the change fans out to Mac notch + Android via SSE.
           markThreadUnread(threadKey, thread?.latestTurn?.completedAt);
+          if (thread?.latestTurn?.completedAt) {
+            void markUnread(scopeThreadRef(thread.environmentId, thread.id));
+          }
         }
         clearSelection();
         return;
@@ -1646,6 +1666,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       clearSelection,
       deleteThread,
       markThreadUnread,
+      markUnread,
       removeFromSelection,
     ],
   );
@@ -1931,7 +1952,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       if (clicked === "mark-unread") {
+        // Local-first for instant pill flip, then server dispatch so
+        // the projection's `last_visited_at` rewinds and every other
+        // surface (Mac notch, Android tray) sees the green pill within
+        // ~250 ms via SSE.
         markThreadUnread(threadKey, thread.latestTurn?.completedAt);
+        if (thread.latestTurn?.completedAt) {
+          void markUnread(threadRef);
+        }
         return;
       }
       if (clicked === "copy-path") {
@@ -1972,6 +2000,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyThreadIdToClipboard,
       deleteThread,
       markThreadUnread,
+      markUnread,
       memberProjectByScopedKey,
       project.cwd,
     ],
@@ -2538,6 +2567,8 @@ interface SidebarProjectsContentProps {
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
+  markVisited: ReturnType<typeof useThreadActions>["markVisited"];
+  markUnread: ReturnType<typeof useThreadActions>["markUnread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
@@ -2579,6 +2610,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     handleNewThread,
     archiveThread,
     deleteThread,
+    markVisited,
+    markUnread,
     sortedProjects,
     expandedThreadListsByProject,
     activeRouteProjectKey,
@@ -2731,6 +2764,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                         handleNewThread={handleNewThread}
                         archiveThread={archiveThread}
                         deleteThread={deleteThread}
+                        markVisited={markVisited}
+                        markUnread={markUnread}
                         threadJumpLabelByKey={threadJumpLabelByKey}
                         attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
                         expandThreadListForProject={expandThreadListForProject}
@@ -2763,6 +2798,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 handleNewThread={handleNewThread}
                 archiveThread={archiveThread}
                 deleteThread={deleteThread}
+                markVisited={markVisited}
+                markUnread={markUnread}
                 threadJumpLabelByKey={threadJumpLabelByKey}
                 attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
                 expandThreadListForProject={expandThreadListForProject}
@@ -2803,7 +2840,7 @@ export default function Sidebar() {
   const sidebarThreadPreviewCount = useSettings((s) => s.sidebarThreadPreviewCount);
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread } = useNewThreadHandler();
-  const { archiveThread, deleteThread } = useThreadActions();
+  const { archiveThread, deleteThread, markVisited, markUnread } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadRef = useParams({
     strict: false,
@@ -3442,6 +3479,8 @@ export default function Sidebar() {
             handleNewThread={handleNewThread}
             archiveThread={archiveThread}
             deleteThread={deleteThread}
+            markVisited={markVisited}
+            markUnread={markUnread}
             sortedProjects={sortedProjects}
             expandedThreadListsByProject={expandedThreadListsByProject}
             activeRouteProjectKey={activeRouteProjectKey}

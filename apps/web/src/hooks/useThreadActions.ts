@@ -98,6 +98,39 @@ export function useThreadActions() {
     refreshArchivedThreadsForEnvironment(target.environmentId);
   }, []);
 
+  // Cross-surface read-state sync: dispatch the orchestration command so
+  // the projection's `last_visited_at` advances and every connected
+  // client (Mac notch, Android notification, T3 web sidebar) sees the
+  // dot grey out in ~250 ms via SSE. Callers pass the exact
+  // `latestTurn.completedAt` the user is acknowledging so clock skew
+  // between browser and server can't leave the green pill lit.
+  // Silently no-op when the thread has no completed turn — the server's
+  // decider rejects that case anyway.
+  const markVisited = useCallback(
+    async (target: ScopedThreadRef, latestTurnCompletedAt: string | undefined) => {
+      if (!latestTurnCompletedAt) return;
+      const api = readEnvironmentApi(target.environmentId);
+      if (!api) return;
+      await api.orchestration.dispatchCommand({
+        type: "thread.mark-visited",
+        commandId: newCommandId(),
+        threadId: target.threadId,
+        latestTurnCompletedAt,
+      });
+    },
+    [],
+  );
+
+  const markUnread = useCallback(async (target: ScopedThreadRef) => {
+    const api = readEnvironmentApi(target.environmentId);
+    if (!api) return;
+    await api.orchestration.dispatchCommand({
+      type: "thread.mark-unread",
+      commandId: newCommandId(),
+      threadId: target.threadId,
+    });
+  }, []);
+
   const deleteThread = useCallback(
     async (target: ScopedThreadRef, opts: { deletedThreadKeys?: ReadonlySet<string> } = {}) => {
       const api = readEnvironmentApi(target.environmentId);
@@ -288,5 +321,7 @@ export function useThreadActions() {
     unarchiveThread,
     deleteThread,
     confirmAndDeleteThread,
+    markVisited,
+    markUnread,
   };
 }
