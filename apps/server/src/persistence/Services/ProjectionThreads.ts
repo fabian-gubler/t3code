@@ -36,6 +36,16 @@ export const ProjectionThread = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
+  /**
+   * Server-side "this thread was acknowledged up to here" timestamp,
+   * written by the projector on `thread.visited` / `thread.marked-unread`.
+   *
+   * Optional so existing SQL paths that don't select `last_visited_at`
+   * (and don't care about the field) can still decode rows. Read paths
+   * that need it — currently just t3-notify, which queries SQLite
+   * directly — see `null` for rows projected before migration 031 ran.
+   */
+  lastVisitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,

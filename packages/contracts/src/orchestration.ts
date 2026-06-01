@@ -513,6 +513,27 @@ const ThreadUnarchiveCommand = Schema.Struct({
   threadId: ThreadId,
 });
 
+// `latestTurnCompletedAt` is the upper-bound timestamp the user is
+// acknowledging — projection stores it as `last_visited_at`. The web
+// client passes the actual `latestTurn.completedAt` (not `Date.now()`)
+// so that clock skew can't leave the green-dot lit after a visit.
+// Rejected by the decider if the thread has no completed turn.
+const ThreadMarkVisitedCommand = Schema.Struct({
+  type: Schema.Literal("thread.mark-visited"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  latestTurnCompletedAt: IsoDateTime,
+});
+
+// Server-side: decider reads the projection for `latestTurn.completedAt`
+// and emits `thread.marked-unread` with `lastVisitedAt = completedAt - 1ms`.
+// Rejected if the thread has no completed turn (nothing to mark unread).
+const ThreadMarkUnreadCommand = Schema.Struct({
+  type: Schema.Literal("thread.mark-unread"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
 const ThreadMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("thread.meta.update"),
   commandId: CommandId,
@@ -656,6 +677,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadMarkVisitedCommand,
+  ThreadMarkUnreadCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -677,6 +700,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadMarkVisitedCommand,
+  ThreadMarkUnreadCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -776,6 +801,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.deleted",
   "thread.archived",
   "thread.unarchived",
+  "thread.visited",
+  "thread.marked-unread",
   "thread.meta-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
@@ -853,6 +880,22 @@ export const ThreadArchivedPayload = Schema.Struct({
 export const ThreadUnarchivedPayload = Schema.Struct({
   threadId: ThreadId,
   updatedAt: IsoDateTime,
+});
+
+// Both events set `projection_threads.last_visited_at = lastVisitedAt`.
+// `thread.visited` carries the latest-turn completion the user is
+// acknowledging; `thread.marked-unread` carries (latestTurnCompletedAt - 1ms)
+// so the projection rewinds just below the completion, matching T3 web's
+// historical localStorage-only behaviour. Two event types so the audit log
+// preserves the user's intent.
+export const ThreadVisitedPayload = Schema.Struct({
+  threadId: ThreadId,
+  lastVisitedAt: IsoDateTime,
+});
+
+export const ThreadMarkedUnreadPayload = Schema.Struct({
+  threadId: ThreadId,
+  lastVisitedAt: IsoDateTime,
 });
 
 export const ThreadMetaUpdatedPayload = Schema.Struct({
@@ -1021,6 +1064,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.unarchived"),
     payload: ThreadUnarchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.visited"),
+    payload: ThreadVisitedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.marked-unread"),
+    payload: ThreadMarkedUnreadPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
