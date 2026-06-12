@@ -1277,6 +1277,9 @@ function workEntryRawCommand(
 
 function buildToolCallExpandedBody(workEntry: TimelineWorkEntry): string | null {
   const blocks: string[] = [];
+  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
+    blocks.push(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
+  }
   if (workEntry.detail?.trim()) {
     blocks.push(workEntry.detail.trim());
   }
