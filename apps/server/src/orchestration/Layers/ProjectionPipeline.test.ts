@@ -1656,6 +1656,155 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("preserves the latest turn when a completed session becomes ready", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-latest-turn-ready-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-latest-turn-ready"),
+        occurredAt: "2026-02-26T13:30:00.000Z",
+        commandId: CommandId.make("cmd-latest-turn-ready-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-latest-turn-ready-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-latest-turn-ready"),
+          title: "Project Latest Turn Ready",
+          workspaceRoot: "/tmp/project-latest-turn-ready",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-02-26T13:30:00.000Z",
+          updatedAt: "2026-02-26T13:30:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-latest-turn-ready-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-latest-turn-ready"),
+        occurredAt: "2026-02-26T13:30:01.000Z",
+        commandId: CommandId.make("cmd-latest-turn-ready-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-latest-turn-ready-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-latest-turn-ready"),
+          projectId: ProjectId.make("project-latest-turn-ready"),
+          title: "Thread Latest Turn Ready",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T13:30:01.000Z",
+          updatedAt: "2026-02-26T13:30:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-latest-turn-ready-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-latest-turn-ready"),
+        occurredAt: "2026-02-26T13:30:02.000Z",
+        commandId: CommandId.make("cmd-latest-turn-ready-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-latest-turn-ready-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-latest-turn-ready"),
+          session: {
+            threadId: ThreadId.make("thread-latest-turn-ready"),
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: TurnId.make("turn-latest-ready"),
+            lastError: null,
+            updatedAt: "2026-02-26T13:30:02.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-latest-turn-ready-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-latest-turn-ready"),
+        occurredAt: "2026-02-26T13:30:03.000Z",
+        commandId: CommandId.make("cmd-latest-turn-ready-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-latest-turn-ready-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-latest-turn-ready"),
+          messageId: MessageId.make("message-latest-ready"),
+          role: "assistant",
+          text: "done",
+          turnId: TurnId.make("turn-latest-ready"),
+          streaming: false,
+          createdAt: "2026-02-26T13:30:03.000Z",
+          updatedAt: "2026-02-26T13:30:03.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-latest-turn-ready-5"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-latest-turn-ready"),
+        occurredAt: "2026-02-26T13:30:04.000Z",
+        commandId: CommandId.make("cmd-latest-turn-ready-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-latest-turn-ready-5"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-latest-turn-ready"),
+          session: {
+            threadId: ThreadId.make("thread-latest-turn-ready"),
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-26T13:30:04.000Z",
+          },
+        },
+      });
+
+      const threadRows = yield* sql<{
+        readonly latestTurnId: string | null;
+      }>`
+        SELECT latest_turn_id AS "latestTurnId"
+        FROM projection_threads
+        WHERE thread_id = 'thread-latest-turn-ready'
+      `;
+      assert.deepEqual(threadRows, [{ latestTurnId: "turn-latest-ready" }]);
+
+      const turnRows = yield* sql<{
+        readonly completedAt: string | null;
+      }>`
+        SELECT completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = 'thread-latest-turn-ready'
+          AND turn_id = 'turn-latest-ready'
+      `;
+      assert.deepEqual(turnRows, [{ completedAt: "2026-02-26T13:30:03.000Z" }]);
+    }),
+  );
+
   it.effect("ignores non-stale provider approval response failures", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
